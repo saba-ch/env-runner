@@ -146,6 +146,17 @@ async function fetchUnoptimized(
   }
 
   const headers = new Headers(res.headers);
+  const contentType = headers.get("content-type") || "";
+  if (res.ok && contentType && !/^image\//i.test(contentType)) {
+    return new Response('"url" parameter is valid but upstream is not an image', {
+      status: 400,
+    });
+  }
+  if (!config?.dangerouslyAllowSVG && /^image\/svg\+xml\b/i.test(contentType)) {
+    return new Response('"url" parameter is valid but image type is not allowed', {
+      status: 400,
+    });
+  }
   if (!headers.has("vary")) {
     headers.set("vary", "Accept");
   }
@@ -268,14 +279,16 @@ export function createVercelImageHandler(opts: {
       }
 
       // Validate source URL against allowlists
-      if (isRemoteUrl(sourceUrl)) {
-        if (!validateRemoteUrl(sourceUrl, config)) {
-          return new Response('"url" parameter is not allowed', { status: 400 });
-        }
-      } else if (sourceUrl.startsWith("/")) {
-        if (!validateLocalUrl(sourceUrl, config)) {
-          return new Response('"url" parameter is not allowed', { status: 400 });
-        }
+      const isLocal = sourceUrl.startsWith("/");
+      const isRemote = isRemoteUrl(sourceUrl);
+      if (!isLocal && !isRemote) {
+        return new Response('"url" parameter is not allowed', { status: 400 });
+      }
+      if (isRemote && !validateRemoteUrl(sourceUrl, config)) {
+        return new Response('"url" parameter is not allowed', { status: 400 });
+      }
+      if (isLocal && !validateLocalUrl(sourceUrl, config)) {
+        return new Response('"url" parameter is not allowed', { status: 400 });
       }
 
       // Block SVG unless explicitly allowed
@@ -313,9 +326,11 @@ export function createVercelImageHandler(opts: {
         modifiers.format = f.replace("image/", "");
       } else {
         const accept = request.headers.get("accept") || "";
-        if (accept.includes("image/avif")) {
+        const allowed = config?.formats?.map((fmt) => fmt.replace(/^image\//, ""));
+        const isAllowed = (fmt: string) => !allowed || allowed.includes(fmt);
+        if (accept.includes("image/avif") && isAllowed("avif")) {
           modifiers.format = "avif";
-        } else if (accept.includes("image/webp")) {
+        } else if (accept.includes("image/webp") && isAllowed("webp")) {
           modifiers.format = "webp";
         }
       }
