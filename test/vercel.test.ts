@@ -254,11 +254,11 @@ describe("VercelEnvRunner", () => {
       runner = new VercelEnvRunner({
         name: "test-img-remote-blocked",
         data: { entry: imageEntry },
-        images: { domains: ["allowed.example.com"] },
+        images: { domains: ["allowed.invalid"] },
       });
       await runner.waitForReady();
       const res = await runner.fetch(
-        "http://localhost/_vercel/image?url=https://evil.example.com/img.png&w=100&q=75",
+        "http://localhost/_vercel/image?url=https://evil.invalid/img.png&w=100&q=75",
       );
       expect(res.status).toBe(400);
       expect(await res.text()).toContain('"url" parameter is not allowed');
@@ -268,12 +268,12 @@ describe("VercelEnvRunner", () => {
       runner = new VercelEnvRunner({
         name: "test-img-remote-allowed",
         data: { entry: imageEntry },
-        images: { domains: ["allowed.example.com"] },
+        images: { domains: ["allowed.invalid"] },
       });
       await runner.waitForReady();
       // Will pass validation but fail to fetch (no such host)
       const res = await runner.fetch(
-        "http://localhost/_vercel/image?url=https://allowed.example.com/img.png&w=100&q=75",
+        "http://localhost/_vercel/image?url=https://allowed.invalid/img.png&w=100&q=75",
       );
       // Should NOT be 400 "url parameter is not allowed"
       expect(await res.text()).not.toContain('"url" parameter is not allowed');
@@ -284,20 +284,20 @@ describe("VercelEnvRunner", () => {
         name: "test-img-remote-pattern",
         data: { entry: imageEntry },
         images: {
-          remotePatterns: [{ protocol: "https", hostname: "cdn.example.com" }],
+          remotePatterns: [{ protocol: "https", hostname: "cdn.invalid" }],
         },
       });
       await runner.waitForReady();
 
       // Blocked: different hostname
       const blocked = await runner.fetch(
-        "http://localhost/_vercel/image?url=https://other.com/img.png&w=100&q=75",
+        "http://localhost/_vercel/image?url=https://other.invalid/img.png&w=100&q=75",
       );
       expect(blocked.status).toBe(400);
 
       // Allowed: matching pattern (will fail to fetch but passes validation)
       const allowed = await runner.fetch(
-        "http://localhost/_vercel/image?url=https://cdn.example.com/img.png&w=100&q=75",
+        "http://localhost/_vercel/image?url=https://cdn.invalid/img.png&w=100&q=75",
       );
       expect(await allowed.text()).not.toContain('"url" parameter is not allowed');
     });
@@ -310,7 +310,7 @@ describe("VercelEnvRunner", () => {
           remotePatterns: [
             {
               protocol: "https",
-              hostname: "^cdn\\.example\\.com$",
+              hostname: "^cdn\\.invalid$",
               pathname: "^/assets/.*$",
             },
           ],
@@ -320,20 +320,20 @@ describe("VercelEnvRunner", () => {
 
       // Blocked: wrong hostname
       const blocked1 = await runner.fetch(
-        "http://localhost/_vercel/image?url=https://other.com/assets/img.png&w=100&q=75",
+        "http://localhost/_vercel/image?url=https://other.invalid/assets/img.png&w=100&q=75",
       );
       expect(blocked1.status).toBe(400);
       expect(await blocked1.text()).toContain('"url" parameter is not allowed');
 
       // Blocked: wrong pathname
       const blocked2 = await runner.fetch(
-        "http://localhost/_vercel/image?url=https://cdn.example.com/other/img.png&w=100&q=75",
+        "http://localhost/_vercel/image?url=https://cdn.invalid/other/img.png&w=100&q=75",
       );
       expect(blocked2.status).toBe(400);
 
       // Allowed: matches regex pattern (will fail to fetch but passes validation)
       const allowed = await runner.fetch(
-        "http://localhost/_vercel/image?url=https://cdn.example.com/assets/img.png&w=100&q=75",
+        "http://localhost/_vercel/image?url=https://cdn.invalid/assets/img.png&w=100&q=75",
       );
       expect(await allowed.text()).not.toContain('"url" parameter is not allowed');
     });
@@ -370,7 +370,7 @@ describe("VercelEnvRunner", () => {
       await runner.waitForReady();
       // No domains/remotePatterns = allow all (will fail to actually fetch)
       const res = await runner.fetch(
-        "http://localhost/_vercel/image?url=https://any.example.com/img.png&w=100&q=75",
+        "http://localhost/_vercel/image?url=https://any.invalid/img.png&w=100&q=75",
       );
       expect(await res.text()).not.toContain('"url" parameter is not allowed');
     });

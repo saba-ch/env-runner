@@ -47,7 +47,9 @@ async function loadIPX(): Promise<IPXModule | undefined> {
 
 function resolveWorkerUrl(address: WorkerAddress, path: string): string {
   if ("socketPath" in address && address.socketPath) {
-    return `http://unix:${address.socketPath}:${path}`;
+    throw new Error(
+      "Vercel image handler requires a TCP worker address (host/port); unix sockets are not supported.",
+    );
   }
   const host = address.host || "127.0.0.1";
   return `http://${host}:${address.port}${path}`;
@@ -61,7 +63,7 @@ function isRemoteUrl(url: string): boolean {
 
 // Build Output API uses PCRE regex (^...$), Next.js config uses globs (**, *)
 function matchPattern(pattern: string, value: string): boolean {
-  if (pattern.startsWith("^") || pattern.endsWith("$")) {
+  if (pattern.startsWith("^") && pattern.endsWith("$")) {
     return new RegExp(pattern).test(value);
   }
   let re = "^";
@@ -104,7 +106,7 @@ function validateRemoteUrl(sourceUrl: string, config?: VercelImageConfig): boole
 
 function validateLocalUrl(sourceUrl: string, config?: VercelImageConfig): boolean {
   if (!config?.localPatterns?.length) return true;
-  const [pathname, search] = sourceUrl.split("?");
+  const [pathname = "", search] = sourceUrl.split("?");
   return config.localPatterns.some((p) => {
     if (p.pathname && !matchPattern(p.pathname, pathname)) return false;
     if (p.search !== undefined && (search || "") !== p.search.replace(/^\?/, "")) return false;
