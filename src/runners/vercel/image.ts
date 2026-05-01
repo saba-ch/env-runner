@@ -57,7 +57,7 @@ function resolveWorkerUrl(address: WorkerAddress, path: string): string {
 // --- URL validation ---
 
 function isRemoteUrl(url: string): boolean {
-  return /^https?:\/\//.test(url) || url.startsWith("//");
+  return /^https?:\/\//.test(url);
 }
 
 // Build Output API uses PCRE regex (^...$), Next.js config uses globs (**, *)
@@ -96,7 +96,7 @@ function validateRemoteUrl(sourceUrl: string, config?: VercelImageConfig): boole
     return true;
   }
   try {
-    const parsed = new URL(sourceUrl.startsWith("//") ? "https:" + sourceUrl : sourceUrl);
+    const parsed = new URL(sourceUrl);
     if (config.domains?.includes(parsed.hostname)) return true;
     if (config.remotePatterns?.some((p) => matchRemotePattern(p, parsed))) return true;
   } catch {}
@@ -124,6 +124,27 @@ function isSvgSource(url: string): boolean {
         }
       })();
   return /\.svgz?(\?|$)/i.test(path);
+}
+
+function applySecurityHeaders(
+  headers: Headers | Record<string, string>,
+  sourceUrl: string,
+  config?: VercelImageConfig,
+): void {
+  const set = (key: string, value: string) => {
+    if (headers instanceof Headers) headers.set(key, value);
+    else headers[key] = value;
+  };
+  if (config?.contentSecurityPolicy) {
+    set("content-security-policy", config.contentSecurityPolicy);
+  } else if (config?.dangerouslyAllowSVG) {
+    // Match Next.js default CSP when SVGs are allowed
+    set("content-security-policy", "script-src 'none'; frame-src 'none'; sandbox;");
+  }
+  if (config?.contentDispositionType) {
+    const filename = sourceUrl.split("/").pop()?.split("?")[0] || "image";
+    set("content-disposition", `${config.contentDispositionType}; filename="${filename}"`);
+  }
 }
 
 // --- Unoptimized fallback ---
@@ -164,6 +185,7 @@ async function fetchUnoptimized(
     const ttl = cacheTTL ?? config?.minimumCacheTTL ?? 60;
     headers.set("cache-control", `public, max-age=${ttl}, s-maxage=${ttl}`);
   }
+  applySecurityHeaders(headers, sourceUrl, config);
 
   return new Response(res.body, {
     status: res.status,
@@ -186,57 +208,62 @@ export function createVercelImageHandler(opts: {
   const { getAddress, config } = opts;
 
   let _ipx: ReturnType<IPXModule["createIPX"]> | undefined;
+  let _ipxPromise: Promise<ReturnType<IPXModule["createIPX"]> | undefined> | undefined;
 
   async function getIPX() {
     if (_ipx) return _ipx;
+    if (_ipxPromise) return _ipxPromise;
+    _ipxPromise = (async () => {
+      const ipxModule = await loadIPX();
+      if (!ipxModule) return undefined;
 
-    const ipxModule = await loadIPX();
-    if (!ipxModule) return;
+      const workerStorage: import("ipx").IPXStorage = {
+        name: "vercel:worker",
+        async getMeta(id) {
+          const address = getAddress();
+          if (!address) return undefined;
+          try {
+            const res = await fetch(resolveWorkerUrl(address, id), { method: "HEAD" });
+            if (!res.ok) return undefined;
+            const lastModified = res.headers.get("last-modified");
+            return {
+              mtime: lastModified ? new Date(lastModified) : undefined,
+              maxAge: config?.minimumCacheTTL ?? 60,
+            };
+          } catch {
+            return undefined;
+          }
+        },
+        async getData(id) {
+          const address = getAddress();
+          if (!address) return undefined;
+          try {
+            const res = await fetch(resolveWorkerUrl(address, id));
+            if (!res.ok) return undefined;
+            return await res.arrayBuffer();
+          } catch {
+            return undefined;
+          }
+        },
+      };
 
-    const workerStorage: import("ipx").IPXStorage = {
-      name: "vercel:worker",
-      async getMeta(id) {
-        const address = getAddress();
-        if (!address) return undefined;
-        try {
-          const res = await fetch(resolveWorkerUrl(address, id), { method: "HEAD" });
-          if (!res.ok) return undefined;
-          const lastModified = res.headers.get("last-modified");
-          return {
-            mtime: lastModified ? new Date(lastModified) : undefined,
-            maxAge: config?.minimumCacheTTL ?? 60,
-          };
-        } catch {
-          return undefined;
-        }
-      },
-      async getData(id) {
-        const address = getAddress();
-        if (!address) return undefined;
-        try {
-          const res = await fetch(resolveWorkerUrl(address, id));
-          if (!res.ok) return undefined;
-          return await res.arrayBuffer();
-        } catch {
-          return undefined;
-        }
-      },
-    };
+      // Remote URL validation is handled before calling ipx(), so
+      // allow all domains here and let our validation layer handle restrictions
+      _ipx = ipxModule.createIPX({
+        storage: workerStorage,
+        httpStorage: ipxModule.ipxHttpStorage({ allowAllDomains: true }),
+        maxAge: config?.minimumCacheTTL ?? 60,
+      });
 
-    // Remote URL validation is handled before calling ipx(), so
-    // allow all domains here and let our validation layer handle restrictions
-    _ipx = ipxModule.createIPX({
-      storage: workerStorage,
-      httpStorage: ipxModule.ipxHttpStorage({ allowAllDomains: true }),
-      maxAge: config?.minimumCacheTTL ?? 60,
-    });
-
-    return _ipx;
+      return _ipx;
+    })();
+    return _ipxPromise;
   }
 
   return {
     close() {
       _ipx = undefined;
+      _ipxPromise = undefined;
     },
     async handle(request: Request): Promise<Response> {
       const url = new URL(request.url);
@@ -276,6 +303,11 @@ export function createVercelImageHandler(opts: {
 
       if (f && config?.formats?.length && !config.formats.includes(f)) {
         return new Response(`"f" must be one of: ${config.formats.join(", ")}`, { status: 400 });
+      }
+
+      // Reject protocol-relative URLs to avoid local/remote ambiguity
+      if (sourceUrl.startsWith("//")) {
+        return new Response('"url" parameter is not allowed', { status: 400 });
       }
 
       // Validate source URL against allowlists
@@ -362,19 +394,7 @@ export function createVercelImageHandler(opts: {
           "cache-control": `public, max-age=${cacheTTL}, s-maxage=${cacheTTL}`,
           vary: "Accept",
         };
-
-        if (config?.contentSecurityPolicy) {
-          headers["content-security-policy"] = config.contentSecurityPolicy;
-        } else if (config?.dangerouslyAllowSVG) {
-          // Match Next.js default CSP when SVGs are allowed
-          headers["content-security-policy"] = "script-src 'none'; frame-src 'none'; sandbox;";
-        }
-
-        if (config?.contentDispositionType) {
-          const filename = sourceUrl.split("/").pop()?.split("?")[0] || "image";
-          headers["content-disposition"] =
-            `${config.contentDispositionType}; filename="${filename}"`;
-        }
+        applySecurityHeaders(headers, sourceUrl, config);
 
         return new Response(body, { headers });
       } catch (error: any) {
