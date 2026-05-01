@@ -28,21 +28,20 @@ export interface VercelImageConfig {
 
 type IPXModule = typeof import("ipx");
 
-let _ipxLoadResult: IPXModule | false | undefined;
+let _ipxModule: IPXModule | undefined;
+let _ipxLoaded = false;
 
 async function loadIPX(): Promise<IPXModule | undefined> {
-  if (_ipxLoadResult !== undefined) {
-    return _ipxLoadResult || undefined;
-  }
+  if (_ipxLoaded) return _ipxModule;
+  _ipxLoaded = true;
   try {
-    _ipxLoadResult = await import("ipx");
-    return _ipxLoadResult;
+    _ipxModule = await import("ipx");
   } catch {
-    _ipxLoadResult = false;
     console.warn(
       "ipx is not installed. Install it for Vercel image optimization: npx nypm i -D ipx",
     );
   }
+  return _ipxModule;
 }
 
 function resolveWorkerUrl(address: WorkerAddress, path: string): string {
@@ -133,6 +132,7 @@ async function fetchUnoptimized(
   sourceUrl: string,
   getAddress: () => WorkerAddress | undefined,
   config?: VercelImageConfig,
+  cacheTTL?: number,
 ): Promise<Response> {
   let res: Response;
   if (sourceUrl.startsWith("/")) {
@@ -161,8 +161,8 @@ async function fetchUnoptimized(
     headers.set("vary", "Accept");
   }
   if (!headers.has("cache-control")) {
-    const cacheTTL = config?.minimumCacheTTL ?? 60;
-    headers.set("cache-control", `public, max-age=${cacheTTL}, s-maxage=${cacheTTL}`);
+    const ttl = cacheTTL ?? config?.minimumCacheTTL ?? 60;
+    headers.set("cache-control", `public, max-age=${ttl}, s-maxage=${ttl}`);
   }
 
   return new Response(res.body, {
@@ -298,9 +298,15 @@ export function createVercelImageHandler(opts: {
         });
       }
 
+      const cacheOverride = Number.parseInt(url.searchParams.get("cache") || "");
+      const cacheTTL =
+        Number.isFinite(cacheOverride) && cacheOverride > 0
+          ? cacheOverride
+          : (config?.minimumCacheTTL ?? 60);
+
       const ipx = await getIPX();
       if (!ipx) {
-        return fetchUnoptimized(sourceUrl, getAddress, config);
+        return fetchUnoptimized(sourceUrl, getAddress, config, cacheTTL);
       }
 
       // Build IPX modifiers
@@ -345,12 +351,6 @@ export function createVercelImageHandler(opts: {
             status: 400,
           });
         }
-
-        const cacheOverride = Number.parseInt(url.searchParams.get("cache") || "");
-        const cacheTTL =
-          Number.isFinite(cacheOverride) && cacheOverride > 0
-            ? cacheOverride
-            : (config?.minimumCacheTTL ?? 60);
 
         const contentType = format ? `image/${format}` : "application/octet-stream";
         const body =
