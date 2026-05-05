@@ -168,7 +168,7 @@ async function fetchUnoptimized(
 
   const headers = new Headers(res.headers);
   const contentType = headers.get("content-type") || "";
-  if (res.ok && contentType && !/^image\//i.test(contentType)) {
+  if (!/^image\//i.test(contentType)) {
     return new Response('"url" parameter is valid but upstream is not an image', {
       status: 400,
     });
@@ -178,8 +178,11 @@ async function fetchUnoptimized(
       status: 400,
     });
   }
-  if (!headers.has("vary")) {
+  const existingVary = headers.get("vary");
+  if (!existingVary) {
     headers.set("vary", "Accept");
+  } else if (!/(^|,\s*)Accept(\s*,|\s*$)/i.test(existingVary)) {
+    headers.set("vary", `${existingVary}, Accept`);
   }
   if (!headers.has("cache-control")) {
     const ttl = cacheTTL ?? config?.minimumCacheTTL ?? 60;
