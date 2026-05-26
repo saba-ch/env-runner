@@ -46,12 +46,12 @@
     "crossws": "^0.4.5",
     "exsolve": "^1.0.8",
     "httpxy": "^0.5.3",
-    "srvx": "^0.11.15"
+    "srvx": "^0.11.16"
   },
   "devDependencies": {
     "@netlify/runtime": "^4.1.24",
     "@types/node": "^25.9.1",
-    "@typescript/native-preview": "7.0.0-dev.20260521.1",
+    "@typescript/native-preview": "7.0.0-dev.20260523.1",
     "@vercel/queue": "^0.2.0",
     "@vitest/coverage-v8": "^4.1.7",
     "automd": "^0.4.3",
@@ -66,9 +66,9 @@
     "vitest": "^4.1.7"
   },
   "peerDependencies": {
-    "@netlify/runtime": "^4.1.23",
+    "@netlify/runtime": "^4.1.24",
     "@vercel/queue": "^0.2.0",
-    "miniflare": "^4.20260515.0"
+    "miniflare": "^4.20260521.0"
   },
   "peerDependenciesMeta": {
     "miniflare": {
